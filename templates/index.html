@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeepGuard AI Detector</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="blob blob-1"></div>
+<div class="blob blob-2"></div>
+
+<div class="container">
+  <div class="header">
+    <span class="badge">AI Powered</span>
+    <h1>DeepGuard Detector</h1>
+    <p>Upload an image or audio file to check for deepfakes</p>
+  </div>
+
+  <div class="card">
+    <div class="tabs">
+      <button class="tab-btn active" id="tab-image" type="button">Image</button>
+      <button class="tab-btn" id="tab-audio" type="button">Audio</button>
+    </div>
+
+    <div class="upload-zone" id="dropZone">
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <p class="drop-text">Drop a file here or <span>browse</span></p>
+      <p class="file-hint" id="fileHint">JPG, PNG, WEBP (max 25MB)</p>
+    </div>
+    <input type="file" id="fileInput" accept="image/*" hidden>
+
+    <div class="preview-area" id="previewArea" style="display:none;margin-top:16px"></div>
+
+    <button class="scan-btn" id="scanBtn" type="button" disabled
+            style="display:flex;align-items:center;justify-content:center;gap:10px">
+      <span class="loader" id="loader" style="display:none"></span>
+      <span id="scanText">Scan Now</span>
+    </button>
+
+    <div class="result-box" id="resultBox" style="display:none">
+      <div class="result-header">
+        <h3 id="verdictText"></h3>
+        <span class="verdict-tag" id="verdictTag"></span>
+      </div>
+      <div class="meter-bar"><div class="meter-fill" id="meterFill"></div></div>
+      <div class="metrics">
+        <span>Fake: <strong id="fakeProb">0%</strong></span>
+        <span>Real: <strong id="realProb">0%</strong></span>
+        <span>Confidence: <strong id="confidence">0%</strong></span>
+      </div>
+      <p class="file-hint" id="details" style="margin-top:12px"></p>
+      <p class="file-hint" id="modelName" style="margin-top:4px"></p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const MAX_MB = 25;
+  const MODES = {
+    image: { endpoint: "/api/analyze",       accept: "image/*",
+             hint: "JPG, PNG, WEBP (max 25MB)", prefix: "image/" },
+    audio: { endpoint: "/api/analyze-audio", accept: "audio/*,.mp3,.wav,.m4a,.ogg,.flac,.mp4",
+             hint: "WAV, MP3, M4A, OGG, FLAC (max 25MB)", prefix: "audio/" }
+  };
+
+  let mode = "image";
+  let selectedFile = null;
+  let previewUrl = null;
+
+  const $ = (id) => document.getElementById(id);
+  const dropZone = $("dropZone"), fileInput = $("fileInput"), previewArea = $("previewArea");
+  const scanBtn = $("scanBtn"), loader = $("loader"), scanText = $("scanText");
+  const resultBox = $("resultBox");
+
+  function setMode(newMode) {
+    mode = newMode;
+    $("tab-image").classList.toggle("active", mode === "image");
+    $("tab-audio").classList.toggle("active", mode === "audio");
+    fileInput.accept = MODES[mode].accept;
+    $("fileHint").textContent = MODES[mode].hint;
+    clearFile();
+  }
+
+  function clearFile() {
+    selectedFile = null;
+    fileInput.value = "";
+    if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
+    previewArea.innerHTML = "";
+    previewArea.style.display = "none";
+    dropZone.style.display = "block";
+    resultBox.style.display = "none";
+    scanBtn.disabled = true;
+  }
+
+  function showError(msg) {
+    resultBox.style.display = "block";
+    $("verdictText").textContent = "Error";
+    const tag = $("verdictTag");
+    tag.textContent = "Failed";
+    tag.className = "verdict-tag fake";
+    $("meterFill").style.width = "0%";
+    $("fakeProb").textContent = "-";
+    $("realProb").textContent = "-";
+    $("confidence").textContent = "-";
+    $("details").textContent = msg;
+    $("modelName").textContent = "";
+  }
+
+  function handleFile(file) {
+    if (!file) return;
+    const okType = file.type.startsWith(MODES[mode].prefix) ||
+      (mode === "audio" && /\.(mp3|wav|m4a|ogg|flac|mp4)$/i.test(file.name));
+    if (!okType) { showError("Please select a valid file type for this tab."); return; }
+    if (file.size > MAX_MB * 1024 * 1024) { showError("File is larger than " + MAX_MB + "MB."); return; }
+
+    clearFile();
+    selectedFile = file;
+    previewUrl = URL.createObjectURL(file);
+
+    const el = document.createElement(mode === "image" ? "img" : "audio");
+    el.src = previewUrl;
+    if (mode === "audio") { el.controls = true; el.style.width = "100%"; }
+
+    const name = document.createElement("p");
+    name.className = "file-hint";
+    name.textContent = file.name;
+
+    const rm = document.createElement("button");
+    rm.type = "button";
+    rm.className = "remove-btn";
+    rm.textContent = "Remove";
+    rm.addEventListener("click", clearFile);
+
+    previewArea.append(el, name, rm);
+    previewArea.style.display = "flex";
+    dropZone.style.display = "none";
+    scanBtn.disabled = false;
+  }
+
+  async function scan() {
+    if (!selectedFile) return;
+    scanBtn.disabled = true;
+    loader.style.display = "inline-block";
+    scanText.textContent = "Analyzing... (models download on first use)";
+    resultBox.style.display = "none";
+
+    const fd = new FormData();
+    fd.append("file", selectedFile);
+
+    try {
+      const res = await fetch(MODES[mode].endpoint, { method: "POST", body: fd });
+      let data;
+      try { data = await res.json(); } catch (_) { throw new Error("Could not read the server response."); }
+      if (!res.ok || data.error) throw new Error(data.error || "Server error");
+
+      const isFake = !!data.is_fake;
+      resultBox.style.display = "block";
+      $("verdictText").textContent = data.verdict;
+      const tag = $("verdictTag");
+      tag.textContent = isFake ? "FAKE" : "AUTHENTIC";
+      tag.className = "verdict-tag " + (isFake ? "fake" : "authentic");
+      const fill = $("meterFill");
+      fill.style.background = isFake ? "var(--danger)" : "var(--success)";
+      fill.style.width = "0%";
+      requestAnimationFrame(() => { fill.style.width = data.confidence + "%"; });
+      $("fakeProb").textContent = data.fake_probability + "%";
+      $("realProb").textContent = data.real_probability + "%";
+      $("confidence").textContent = data.confidence + "%";
+      $("details").textContent = data.details || "";
+      $("modelName").textContent = data.model ? "Model: " + data.model : "";
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      loader.style.display = "none";
+      scanText.textContent = "Scan Now";
+      scanBtn.disabled = false;
+    }
+  }
+
+  $("tab-image").addEventListener("click", () => setMode("image"));
+  $("tab-audio").addEventListener("click", () => setMode("audio"));
+  dropZone.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => handleFile(fileInput.files[0]));
+  scanBtn.addEventListener("click", scan);
+
+  ["dragenter", "dragover"].forEach(ev => dropZone.addEventListener(ev, e => {
+    e.preventDefault(); dropZone.classList.add("dragover");
+  }));
+  ["dragleave", "drop"].forEach(ev => dropZone.addEventListener(ev, e => {
+    e.preventDefault(); dropZone.classList.remove("dragover");
+  }));
+  dropZone.addEventListener("drop", e => handleFile(e.dataTransfer.files[0]));
+})();
+</script>
+</body>
+</html>
